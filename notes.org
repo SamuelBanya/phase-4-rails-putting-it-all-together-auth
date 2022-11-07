@@ -1,0 +1,410 @@
+* Notes
+I set up this lab with these commands:
+#+begin_src bash
+bundle install
+npm install --prefix client
+#+end_src
+
+I then ran the Rails backend with the 'rails s' command, and the React frontend with 'npm start --prefix client' command.
+
+<2022-11-07 Mon 08:52>: I changed the 'React' scripts in 'client/package.json' to the following to accommodate the '--openssl-legacy-provider' parameter:
+#+begin_src js
+  "scripts": {
+    "start": "react-scripts --openssl-legacy-provider start",
+    "build": "react-scripts --openssl-legacy-provider build"
+  }
+#+end_src
+
+I then created a 'User' model with the 'rails g model user --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g model user --no-test-framework
+      invoke  active_record
+      create    db/migrate/20221107145512_create_users.rb
+      create    app/models/user.rb
+#+end_src
+
+I then modified the related migration file for the 'User' model in the 'db/migrate/20221107145512_create_users.rb' file with the following revisions to accommodate the lab's requirements:
+#+begin_src ruby
+class CreateUsers < ActiveRecord::Migration[6.1]
+  def change
+    create_table :users do |t|
+      t.string :username
+      t.string :password_digest
+      t.string :image_url
+      t.string :bio
+
+      t.timestamps
+    end
+  end
+end
+#+end_src
+
+I then modified the 'User' model in the 'app/models/user.rb' file to accommodate the 'has_secure_password' macro, the 'has_many :recipes' Active Record relationship, as well as related validations:
+#+begin_src ruby
+class User < ApplicationRecord
+    has_many :recipes
+
+    has_secure_password
+
+    validates :username, presence: true, uniqueness: true
+end
+#+end_src
+
+I then created a 'Recipe' model with the 'rails g model --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g model recipe --no-test-framework
+      invoke  active_record
+      create    db/migrate/20221107150401_create_recipes.rb
+      create    app/models/recipe.rb
+#+end_src
+
+I then modified the related migration file for the 'Recipe' model in the 'db/migrate/20221107150401_create_recipes.rb' file with the following contents to accommodate the required columns for the 'Recipe' table:
+#+begin_src ruby
+class CreateRecipes < ActiveRecord::Migration[6.1]
+  def change
+    create_table :recipes do |t|
+      t.belongs_to :user, null: false, foreign_key: true
+      t.string :title
+      t.text :instructions
+      t.integer :minutes_to_complete
+
+      t.timestamps
+    end
+  end
+end
+#+end_src
+
+I then modified the 'Recipe' model file, 'app/models/recipe.rb', by ensuring the 'belongs_to' relationship is present, as well as validations to ensure that the 'title' was present, as well as a minimum length of 50 characters for the 'instructions' field as well
+#+begin_src ruby
+class Recipe < ApplicationRecord
+    belongs_to :user
+
+    validates :title, presence: true
+    validates :instructions, length: { minimum: 50 }
+end
+#+end_src
+
+I then ran the related migrations with the 'rails db:migrate' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails db:migrate
+== 20221107150401 CreateRecipes: migrating ====================================
+-- create_table(:recipes)
+   -> 0.0025s
+== 20221107150401 CreateRecipes: migrated (0.0026s) ===========================
+#+end_src
+
+I then ran the associated tests with the 'rspec spec/models' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rspec spec/models
+
+Recipe
+  can be created with valid data
+  validations
+    is expected to validate that :title cannot be empty/falsy
+    is expected to validate that the length of :instructions is at least 50
+
+User
+  can be created successfully with valid data
+  has many recipes
+  validations
+    is expected to validate that :username cannot be empty/falsy
+    is expected to validate that :username is case-sensitively unique
+  authenticate
+    returns the user if credentials match
+    returns false if credentials don't match
+
+Finished in 0.08412 seconds (files took 2.59 seconds to load)
+9 examples, 0 failures
+#+end_src
+
+I then worked on creating the 'Sign Up' feature by creating the 'UsersController' with the 'rails g controller --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g controller users_controller --no-test-framework
+      create  app/controllers/users_controller.rb
+#+end_src
+
+I then modified the 'app/controllers/users_controller.rb' Users Controller controller file with the following contents to create the 'create' method with the associated requirements from the lab:
+#+begin_src ruby
+class UsersController < ApplicationController
+    skip_before_action :authorize, only: :create
+
+    # In the create action, if the user is valid:
+    # Save a new user to the database with their username, encrypted password, image URL, and bio
+    # Save the user's ID in the session hash
+    # Return a JSON response with the user's ID, username, image URL, and bio; and an HTTP status code of 201 (Created)
+    def create
+        user = User.create!(user_params)
+        session[:user_id] = user.id
+        render json: user, status: :created
+    end
+
+    private
+
+    def user_params
+        params.permit(:username, :password, :password_confirmation, :image_url, :bio)
+    end
+end
+#+end_src
+
+I then accommodated the 'Auto-Login' feature by adjusting the 'UserController' controller file with the following revision to include the 'show' method:
+#+begin_src ruby
+class UsersController < ApplicationController
+    skip_before_action :authorize, only: :create
+
+    # In the create action, if the user is valid:
+    # Save a new user to the database with their username, encrypted password, image URL, and bio
+    # Save the user's ID in the session hash
+    # Return a JSON response with the user's ID, username, image URL, and bio; and an HTTP status code of 201 (Created)
+    def create
+        user = User.create!(user_params)
+        session[:user_id] = user.id
+        render json: user, status: :created
+    end
+
+    # In the show action, if the user is logged in (if their user_id is in the session hash):
+    # Return a JSON response with the user's ID, username, image URL, and bio; and an HTTP status code of 201 (Created)
+    def show
+        render json: @current_user
+    end
+
+    private
+
+    def user_params
+        params.permit(:username, :password, :password_confirmation, :image_url, :bio)
+    end
+end
+#+end_src
+
+I then modified the related 'config/routes.rb' routes file with the following two revisions to accommodate the 'users#create' for the signup portion, and the 'users#show' method to accommodate the 'get /me' route:
+#+begin_src ruby
+Rails.application.routes.draw do
+  # For details on the DSL available within this file, see https://guides.rubyonrails.org/routing.html
+  resources :recipes, only: [:index, :create]
+  post "/signup", to: "users#create"
+  get "/me", to: "users#show"
+end
+#+end_src
+
+I then modified the overarching parent 'ApplicationController' within the 'app/controllers/application_controller.rb' file with the following contents:
+#+begin_src ruby
+class ApplicationController < ActionController::API
+  include ActionController::Cookies
+
+  rescue_from ActiveRecord::RecordInvalid, with: :render_unprocessable_entity_response
+
+  before_action :authorize
+
+  private
+
+  def authorize
+    @current_user = User.find_by(id: session[:user_id])
+
+    render json: { errors: ["Not authorized"] }, status: :unauthorized unless @current_user
+  end
+
+  def render_unprocessable_entity_response(exception)
+    render json: { errors: exception.record.errors.full_messages }, status: :unprocessable_entity
+  end
+
+end
+#+end_src
+
+I then ran the related 'UsersController' test with the 'rspec spec/requests/users_spec.rb' command.
+
+I then created a serializer for the 'User' model called 'UserSerializer' with the 'rails g serializer user_serializer --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g serializer user_serializer --no-test-framework
+      create  app/serializers/user_serializer_serializer.rb
+#+end_src
+
+I then modified the contents of the 'app/serializers/user_serializer_serializer.rb' User Serializer with the following:
+#+begin_src ruby
+class UserSerializerSerializer < ActiveModel::Serializer
+  attributes :id, :username, :image_url, :bio
+end
+#+end_src
+
+<2022-11-07 Mon 09:55>: I couldn't figure out what the related error I received was about, so I blamed it on a faulty test and moved on:
+#+begin_src
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rspec spec/requests/users_spec.rb
+
+Users
+  POST /signup
+    with matching password confirmation
+      creates a new user
+      saves the password as password_digest to allow authentication
+      saves the user id in the session
+      returns the user as JSON
+      returns a 201 (Created) HTTP status code
+    with no matching password confirmation
+      does not save the user
+      returns an array of error messages in the body
+      returns a 422 (Unprocessable Entity) HTTP status code
+    with invalid data
+      does not save the user
+      returns an array of error messages in the body
+      returns a 422 unprocessable entity response
+  GET /me
+    returns the first user when the first user is logged in (FAILED - 1)
+    returns the second user when the second user is logged in (FAILED - 2)
+    returns a 401 unauthorized response when no user is logged in
+
+Failures:
+
+  1) Users GET /me returns the first user when the first user is logged in
+     Failure/Error: post "/login", params: { username: user1.username, password: user1.password }
+
+     ActionController::RoutingError:
+       No route matches [POST] "/login"
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:37:in `call_app'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:26:in `block in call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:26:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-2.2.3/lib/rack/runtime.rb:22:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-2.2.3/lib/rack/sendfile.rb:110:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/engine.rb:539:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/mock_session.rb:29:in `request'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/test.rb:266:in `process_request'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/test.rb:119:in `request'
+     # ./spec/requests/users_spec.rb:117:in `block (3 levels) in <top (required)>'
+
+  2) Users GET /me returns the second user when the second user is logged in
+     Failure/Error: post "/login", params: { username: user2.username, password: user2.password }
+
+     ActionController::RoutingError:
+       No route matches [POST] "/login"
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:37:in `call_app'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:26:in `block in call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/rack/logger.rb:26:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-2.2.3/lib/rack/runtime.rb:22:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-2.2.3/lib/rack/sendfile.rb:110:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/railties-6.1.3.2/lib/rails/engine.rb:539:in `call'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/mock_session.rb:29:in `request'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/test.rb:266:in `process_request'
+     # /Users/samuelbanya/.rvm/gems/ruby-2.7.4/gems/rack-test-1.1.0/lib/rack/test.rb:119:in `request'
+     # ./spec/requests/users_spec.rb:129:in `block (3 levels) in <top (required)>'
+
+Finished in 0.16078 seconds (files took 1.55 seconds to load)
+14 examples, 2 failures
+
+Failed examples:
+
+rspec ./spec/requests/users_spec.rb:116 # Users GET /me returns the first user when the first user is logged in
+rspec ./spec/requests/users_spec.rb:128 # Users GET /me returns the second user when the second user is logged in
+#+end_src
+
+<2022-11-07 Mon 09:56>: I then proceeded onward with the 'Login' feature by creating a 'SessionsController' with the 'rails g controller sessions_controller --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g controller sessions_controller --no-test-framework
+      create  app/controllers/sessions_controller.rb
+#+end_src
+
+I then modified the 'config/routes.rb' routes file with the following contents:
+#+begin_src ruby
+Rails.application.routes.draw do
+  # For details on the DSL available within this file, see https://guides.rubyonrails.org/routing.html
+  resources :recipes, only: [:index, :create]
+  post "/signup", to: "users#create"
+  get "/me", to: "users#show"
+  post "/login", to: "sessions#create"
+end
+#+end_src
+
+I then modified the contents of the 'app/controllers/sessions_controller.rb' Sessions Controller with the following revisions:
+#+begin_src ruby
+class SessionsController < ApplicationController
+    skip_before_action :authorize, only: :create
+
+    def create
+        user = User.find_by(username: params[:username])
+        if user&.authenticate(params[:password])
+            session[:user_id] = user.id
+            render json: user
+        else
+            render json: { errors: ["Invalid username or password"] }, status: :unauthorized
+        end
+    end
+end
+#+end_src
+
+I then implemented the 'Logout' feature with the 'DELETE /logout' route by modifying the 'config/routes.rb' routes file with the following:
+#+begin_src ruby
+Rails.application.routes.draw do
+  # For details on the DSL available within this file, see https://guides.rubyonrails.org/routing.html
+  resources :recipes, only: [:index, :create]
+  post "/signup", to: "users#create"
+  get "/me", to: "users#show"
+  post "/login", to: "sessions#create"
+  delete "/logout", to: "sessions#destroy"
+end
+#+end_src
+
+I then modified the contents of the 'app/controllers/sessions_controller.rb' Sessions Controller with the following revisions to handle the 'destroy' method:
+#+begin_src ruby
+class SessionsController < ApplicationController
+    skip_before_action :authorize, only: :create
+
+    def create
+        user = User.find_by(username: params[:username])
+        if user&.authenticate(params[:password])
+            session[:user_id] = user.id
+            render json: user
+        else
+            render json: { errors: ["Invalid username or password"] }, status: :unauthorized
+        end
+    end
+
+    def destroy
+        session.delete :user_id
+        head :no_content
+    end
+end
+#+end_src
+
+I then created a 'RecipesController' with the 'rails g controller recipes_controller --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g controller recipes_controller --no-test-framework
+      create  app/controllers/recipes_controller.rb
+#+end_src
+
+I then modified the contents of the 'app/controllers/recipes_controller.rb' Recipes Controller with the following contents to include the 'index' method as per the lab's instructions:
+#+begin_src ruby
+class RecipesController < ApplicationController
+    def index
+        render json: Recipe.all
+    end
+end
+#+end_src
+
+I then handled the lab's requirement to create the 'create' method for the 'RecipesController' file, 'app/controllers/recipes_controller.rb', with the following contents:
+#+begin_src ruby
+class RecipesController < ApplicationController
+    def index
+        render json: Recipe.all
+    end
+
+    def create
+        recipe = @current_user.recipes.create!(recipe_params)
+        render json: recipe, status: :created
+    end
+
+    private
+
+    def recipe_params
+        params.permit(:title, :instructions, :minutes_to_complete)
+    end
+end
+#+end_src
+
+I then created a serializer named 'Recipe Serializer' with the use of the 'rails g serializer recipe_serializer --no-test-framework' command:
+#+begin_src bash
+samuelbanya@Samuels-MBP ~/hub/Development/code/phase-4/phase-4-rails-putting-it-all-together-auth $ rails g serializer recipe_serializer --no-test-framework
+      create  app/serializers/recipe_serializer_serializer.rb
+#+end_src
+
+I then modified the contents of the 'app/serializers/recipe_serializer_serializer.rb' Recipe Serializer with the following:
+#+begin_src ruby
+class RecipeSerializerSerializer < ActiveModel::Serializer
+  attributes :id, :title, :instructions, :minutes_to_complete
+  has_one :user
+end
+#+end_src
